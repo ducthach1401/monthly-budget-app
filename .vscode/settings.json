@@ -1,3 +1,5 @@
 {
-  "js/ts.tsdk.path": "node_modules/typescript/lib"
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "cSpell.words": ["ollama"],
+  "typescript.tsdk": "node_modules/typescript/lib"
 }

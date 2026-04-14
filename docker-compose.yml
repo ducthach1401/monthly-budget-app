@@ -1,0 +1,52 @@
+services:
+  app:
+    image: monthly-budget-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        APP_PORT: ${APP_PORT}
+    container_name: monthly-budget-app
+    ports:
+      - '${APP_PORT}:${APP_PORT}'
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      PORT: ${APP_PORT}
+    env_file:
+      - .env
+    depends_on:
+      - ollama
+      - mysql
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.20.3
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+    command:
+      - 'ollama serve & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull "$$OLLAMA_MODEL"; wait'
+    ports:
+      - '${OLLAMA_PORT}:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - '${DB_PORT}:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  mysql_data:

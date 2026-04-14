@@ -1,17 +1,17 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
-import { AppModule } from './app.module';
+import { AppModule } from './app/app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ transform: true }));
-  app.useStaticAssets(join(__dirname, '..', 'public'));
-  const port = process.env.PORT ?? 3000;
-  await app.listen(port);
-  console.log(`🚀 Server running at http://localhost:${port}`);
-  console.log(`💬 Chat UI at http://localhost:${port}/index.html`);
+  const port = Number(process.env.APP_PORT ?? process.env.PORT ?? 3000);
+  const host = process.env.APP_HOST ?? '0.0.0.0';
+  const publicHost = process.env.PUBLIC_HOST ?? 'localhost';
+
+  await app.listen(port, host);
+  console.log(`🚀 Server running at http://${publicHost}:${port}`);
 }
 void bootstrap();

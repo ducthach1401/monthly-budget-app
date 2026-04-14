@@ -12,7 +12,7 @@ import type { Response } from 'express';
 import { ChatService } from './chat.service';
 import { ChatDto } from './dto/chat.dto';
 
-@Controller('chat')
+@Controller('api/v1/chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 

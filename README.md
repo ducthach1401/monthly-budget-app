@@ -44,6 +44,51 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Run with Docker (production)
+
+```bash
+# build app image and start app + ollama
+$ docker compose up --build
+```
+
+- App runs at `http://localhost:3000`
+- Ollama API runs at `http://localhost:11434`
+- App image is built from production `runner` stage and starts with PM2
+
+## Run with Docker (development)
+
+```bash
+$ docker compose -f docker-compose.dev.yml up --build
+```
+
+- App runs with hot reload using `yarn start:dev`
+- Source code is mounted into container for local development
+
+## Telegram webhook
+
+- Webhook endpoint: `POST /api/v1/telegram/webhook`
+- The app auto-creates user accounts from Telegram sender info and stores inbound/outbound messages in MySQL.
+- Required env vars:
+  - `TELEGRAM_BOT_TOKEN`
+  - `TELEGRAM_WEBHOOK_SECRET` (optional, validated via `x-telegram-bot-api-secret-token`)
+  - `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+
+### Build and run without Compose
+
+```bash
+# build app image
+$ docker build -t monthly-budget-app:latest --target runner .
+
+# create a user-defined network for container DNS
+$ docker network create monthly-budget-net
+
+# run Ollama
+$ docker run -d --name ollama --network monthly-budget-net -p 11434:11434 -v ollama_data:/root/.ollama ollama/ollama:stable
+
+# run app
+$ docker run -d --name monthly-budget-app --network monthly-budget-net -p 3000:3000 --env-file .env -e OLLAMA_HOST=http://ollama:11434 monthly-budget-app:latest
+```
+
 ## Run tests
 
 ```bash
