@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { OgmaInterceptor, OgmaModule } from '@ogma/nestjs-module';
+import { ExpressParser } from '@ogma/platform-express';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ChatModule } from '../chat/chat.module';
@@ -11,6 +14,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    OgmaModule.forRoot({
+      application: 'monthly-budget-app',
+      color: true,
+      json: false,
+    }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -30,6 +38,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
     BudgetModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    ExpressParser,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: OgmaInterceptor,
+    },
+  ],
 })
 export class AppModule {}

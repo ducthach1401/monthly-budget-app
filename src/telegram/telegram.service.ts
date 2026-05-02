@@ -383,10 +383,7 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
         const toolCall = rawCall as {
           function: { name: string; arguments: string };
         };
-        const args = JSON.parse(toolCall.function.arguments || '{}') as Record<
-          string,
-          unknown
-        >;
+        const args = this.parseToolArgs(toolCall.function.arguments);
         const reply = await this.executeTool(
           toolCall.function.name,
           args,
@@ -426,6 +423,23 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
           user,
         }),
       );
+    }
+  }
+
+  private parseToolArgs(rawArgs?: string): Record<string, unknown> {
+    if (!rawArgs?.trim()) return {};
+    try {
+      const parsed: unknown = JSON.parse(rawArgs);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        !Array.isArray(parsed)
+      ) {
+        return parsed as Record<string, unknown>;
+      }
+      return {};
+    } catch {
+      return {};
     }
   }
 
@@ -558,7 +572,7 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
         const setting = await this.reminderService.getReminder(user.id);
         if (!setting || !setting.enabled)
           return '🔕 Bạn chưa đặt nhắc nhở nào.\n\nNói "nhắc tôi lúc 20:00" để đặt.';
-        return `⏰ Nhắc nhở hàng ngày lúc ${(setting.reminderTimes as string[]).join(', ')}.\n\nNói "tắt nhắc nhở" để hủy.`;
+        return `⏰ Nhắc nhở hàng ngày lúc ${setting.reminderTimes.join(', ')}.\n\nNói "tắt nhắc nhở" để hủy.`;
       }
 
       case 'update_transaction': {
