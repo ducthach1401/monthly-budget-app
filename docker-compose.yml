@@ -11,27 +11,13 @@ services:
     ports:
       - '${APP_PORT}:${APP_PORT}'
     environment:
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL}
       PORT: ${APP_PORT}
     env_file:
       - .env
     depends_on:
-      - ollama
       - mysql
-    restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:0.20.3
-    entrypoint: ["/bin/sh", "-c"]
-    environment:
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
-    command:
-      - 'ollama serve & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull "$$OLLAMA_MODEL"; wait'
-    ports:
-      - '${OLLAMA_PORT}:11434'
-    volumes:
-      - ollama_data:/root/.ollama
     restart: unless-stopped
 
   mysql:
@@ -48,5 +34,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  ollama_data:
   mysql_data:

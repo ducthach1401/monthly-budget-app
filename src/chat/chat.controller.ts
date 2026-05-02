@@ -3,7 +3,6 @@ import {
   Post,
   Get,
   Body,
-  Param,
   Res,
   HttpException,
   HttpStatus,
@@ -54,25 +53,6 @@ export class ChatController {
       return {
         success: true,
         data: models,
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  @Post('models/pull/:name')
-  async pullModel(@Param('name') name: string) {
-    try {
-      await this.chatService.pullModel(name);
-      return {
-        success: true,
-        message: `Model ${name} pulled successfully`,
       };
     } catch (error) {
       throw new HttpException(

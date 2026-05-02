@@ -1,28 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Ollama } from 'ollama';
+import OpenAI from 'openai';
 import { ChatDto } from './dto/chat.dto';
 import type { Response } from 'express';
 
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
-  private readonly ollama: Ollama;
+  private readonly client: OpenAI;
   private readonly defaultModel: string;
 
   constructor(private configService: ConfigService) {
-    const host = this.configService.get<string>(
-      'OLLAMA_HOST',
-      'http://localhost:11434',
-    );
+    const apiKey = this.configService.get<string>('GROQ_API_KEY', '');
     this.defaultModel = this.configService.get<string>(
-      'OLLAMA_MODEL',
-      'llama3.2',
+      'GROQ_MODEL',
+      'llama-3.3-70b-versatile',
     );
-    this.ollama = new Ollama({ host });
-    this.logger.log(
-      `Ollama configured at ${host} with default model: ${this.defaultModel}`,
-    );
+    this.client = new OpenAI({
+      apiKey,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
+    this.logger.log(`Groq configured with default model: ${this.defaultModel}`);
   }
 
   async chat(chatDto: ChatDto): Promise<{ role: string; content: string }> {
@@ -34,14 +32,15 @@ export class ChatService {
 
     this.logger.log(`Sending chat request to model: ${model}`);
 
-    const response = await this.ollama.chat({
+    const response = await this.client.chat.completions.create({
       model,
       messages,
     });
 
+    const choice = response.choices[0].message;
     return {
-      role: response.message.role,
-      content: response.message.content,
+      role: choice.role,
+      content: choice.content ?? '',
     };
   }
 
@@ -58,17 +57,19 @@ export class ChatService {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const stream = await this.ollama.chat({
+    const stream = await this.client.chat.completions.create({
       model,
       messages,
       stream: true,
     });
 
     for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      const done = chunk.choices[0]?.finish_reason != null;
       const data = JSON.stringify({
-        role: chunk.message.role,
-        content: chunk.message.content,
-        done: chunk.done,
+        role: delta?.role ?? 'assistant',
+        content: delta?.content ?? '',
+        done,
       });
       res.write(`data: ${data}\n\n`);
     }
@@ -78,11 +79,6 @@ export class ChatService {
   }
 
   async listModels() {
-    return this.ollama.list();
-  }
-
-  async pullModel(modelName: string) {
-    this.logger.log(`Pulling model: ${modelName}`);
-    return this.ollama.pull({ model: modelName });
+    return this.client.models.list();
   }
 }
