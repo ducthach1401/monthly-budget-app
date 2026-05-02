@@ -28,7 +28,10 @@ export class TelegramService {
     this.botToken = this.configService.getOrThrow<string>('TELEGRAM_BOT_TOKEN');
     this.webhookSecret =
       this.configService.get<string>('TELEGRAM_WEBHOOK_SECRET') ?? null;
-    this.model = this.configService.getOrThrow<string>('OLLAMA_MODEL');
+    this.model = this.configService.get<string>(
+      'GROQ_MODEL',
+      'llama-3.3-70b-versatile',
+    );
   }
 
   validateWebhookSecret(secretHeader?: string): boolean {
@@ -100,7 +103,10 @@ export class TelegramService {
     );
   }
 
-  private async sendTelegramMessage(chatId: string, text: string): Promise<void> {
+  private async sendTelegramMessage(
+    chatId: string,
+    text: string,
+  ): Promise<void> {
     const response = await fetch(
       `https://api.telegram.org/bot${this.botToken}/sendMessage`,
       {
