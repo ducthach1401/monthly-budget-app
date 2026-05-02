@@ -16,17 +16,17 @@ export class ReminderService {
     private readonly budgetService: BudgetService,
   ) {}
 
-  async setReminder(user: TelegramUserEntity, time: string): Promise<void> {
+  async setReminder(user: TelegramUserEntity, times: string[]): Promise<void> {
     let setting = await this.reminderRepository.findOne({
       where: { user: { id: user.id } },
     });
     if (setting) {
-      setting.reminderTime = time;
+      setting.reminderTimes = times;
       setting.enabled = true;
     } else {
       setting = this.reminderRepository.create({
         user,
-        reminderTime: time,
+        reminderTimes: times,
         enabled: true,
       });
     }
@@ -55,10 +55,13 @@ export class ReminderService {
     const mm = String(now.getMinutes()).padStart(2, '0');
     const currentTime = `${hh}:${mm}`;
 
-    const settings = await this.reminderRepository.find({
-      where: { reminderTime: currentTime, enabled: true },
+    const allSettings = await this.reminderRepository.find({
+      where: { enabled: true },
       relations: ['user'],
     });
+    const settings = allSettings.filter((s) =>
+      (s.reminderTimes as string[]).includes(currentTime),
+    );
 
     for (const setting of settings) {
       const user = setting.user;

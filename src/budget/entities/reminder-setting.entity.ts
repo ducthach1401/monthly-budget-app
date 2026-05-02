@@ -17,9 +17,9 @@ export class ReminderSettingEntity {
   @JoinColumn({ name: 'userId' })
   user: TelegramUserEntity;
 
-  // Format "HH:mm", ví dụ: "20:00"
-  @Column({ type: 'varchar', length: 5 })
-  reminderTime: string;
+  // Danh sách giờ nhắc nhở, format "HH:mm", ví dụ: ["08:00", "12:00", "21:00"]
+  @Column({ type: 'simple-array' })
+  reminderTimes: string[];
 
   @Column({ type: 'boolean', default: true })
   enabled: boolean;

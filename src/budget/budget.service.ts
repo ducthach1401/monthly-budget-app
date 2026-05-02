@@ -186,6 +186,34 @@ ${lines.join('\n')}`;
     });
   }
 
+  async updateTransactionAmount(
+    id: number,
+    userId: number,
+    newAmount: number,
+  ): Promise<TransactionEntity | null> {
+    const tx = await this.transactionRepository.findOne({
+      where: { id, user: { id: userId } },
+    });
+    if (!tx) return null;
+    tx.amount = newAmount;
+    return this.transactionRepository.save(tx);
+  }
+
+  async findTransactionByDescriptionHint(
+    userId: number,
+    hint: string,
+  ): Promise<TransactionEntity | null> {
+    const all = await this.transactionRepository.find({
+      where: { user: { id: userId } },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+    const lowerHint = hint.toLowerCase();
+    return (
+      all.find((tx) => tx.description.toLowerCase().includes(lowerHint)) ?? null
+    );
+  }
+
   buildTransactionAddedMessage(
     tx: TransactionEntity,
     income: number,

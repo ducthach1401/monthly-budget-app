@@ -8,6 +8,7 @@ import { ReminderService } from '../budget/reminder.service';
 import {
   TransactionType,
   TransactionCategory,
+  TransactionEntity,
 } from '../budget/entities/transaction.entity';
 import {
   TelegramMessageEntity,
@@ -116,16 +117,18 @@ const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'set_reminder',
-      description: 'Đặt nhắc nhở hàng ngày để ghi chi tiêu',
+      description:
+        'Đặt nhắc nhở hàng ngày để ghi chi tiêu. Có thể đặt nhiều khung giờ.',
       parameters: {
         type: 'object',
         properties: {
-          time: {
+          times: {
             type: 'string',
-            description: 'Giờ nhắc nhở theo format HH:mm, ví dụ "20:00"',
+            description:
+              'Các giờ nhắc nhở cách nhau bằng dấu phẩy, format HH:mm, ví dụ "08:00,12:00,21:00"',
           },
         },
-        required: ['time'],
+        required: ['times'],
       },
     },
   },
@@ -148,6 +151,33 @@ const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'update_transaction',
+      description:
+        'Sửa số tiền của một khoản giao dịch đã ghi (ghi nhầm số tiền). Sẽ hỏi xác nhận trước khi sửa.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'number',
+            description: 'ID khoản cần sửa. Nếu không biết ID thì để trống.',
+          },
+          description_hint: {
+            type: 'string',
+            description:
+              'Một phần mô tả khoản cần sửa để tìm kiếm (ví dụ: "tai nghe"). Dùng khi không biết ID.',
+          },
+          new_amount: {
+            type: 'number',
+            description: 'Số tiền đúng (VND). 50k=50000, 1tr=1000000',
+          },
+        },
+        required: ['new_amount'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'reset_account',
       description:
         'Xóa toàn bộ dữ liệu tài khoản (giao dịch, lịch sử chat). Yêu cầu xác nhận.',
@@ -163,7 +193,12 @@ export class TelegramService {
   private readonly botToken: string;
   private readonly webhookSecret: string | null;
   private readonly model: string;
+  private readonly fallbackModels: string[];
   private readonly pendingReset = new Map<string, boolean>();
+  private readonly pendingUpdate = new Map<
+    string,
+    { txId: number; newAmount: number; oldAmount: number; description: string }
+  >();
 
   constructor(
     private readonly configService: ConfigService,
@@ -181,6 +216,11 @@ export class TelegramService {
       'GROQ_MODEL',
       'llama-3.3-70b-versatile',
     );
+    this.fallbackModels = this.configService
+      .get<string>('GROQ_FALLBACK_MODELS', 'llama-3.1-8b-instant,gemma2-9b-it')
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean);
     this.client = new OpenAI({
       apiKey: this.configService.get<string>('GROQ_API_KEY', ''),
       baseURL: 'https://api.groq.com/openai/v1',
@@ -224,6 +264,37 @@ export class TelegramService {
     user.firstName = message.from.first_name ?? null;
     user.lastName = message.from.last_name ?? null;
     user = await this.userRepository.save(user);
+
+    // Xử lý xác nhận sửa số tiền
+    if (this.pendingUpdate.has(chatId)) {
+      const pending = this.pendingUpdate.get(chatId)!;
+      this.pendingUpdate.delete(chatId);
+      if (CONFIRM_RESET_KEYWORDS.some((k) => lower.includes(k))) {
+        const updated = await (
+          this.budgetService.updateTransactionAmount as (
+            id: number,
+            userId: number,
+            newAmount: number,
+          ) => Promise<TransactionEntity | null>
+        )(pending.txId, user.id, pending.newAmount);
+        if (!updated) {
+          await this.sendTelegramMessage(
+            chatId,
+            '❌ Không tìm thấy khoản cần sửa.',
+          );
+        } else {
+          await this.sendTelegramMessage(
+            chatId,
+            `✅ Đã sửa khoản #${pending.txId}:\n` +
+              `📝 ${pending.description}\n` +
+              `💰 ${pending.oldAmount.toLocaleString('vi-VN')}đ → ${pending.newAmount.toLocaleString('vi-VN')}đ`,
+          );
+        }
+      } else {
+        await this.sendTelegramMessage(chatId, '❌ Đã hủy sửa khoản.');
+      }
+      return;
+    }
 
     // Xử lý xác nhận reset (vẫn giữ vì cần confirmation an toàn)
     if (this.pendingReset.get(chatId)) {
@@ -279,7 +350,8 @@ Hãy hiểu ý định của người dùng và gọi đúng function. Ví dụ:
 - "lương 10tr" → add_transaction (income, Lương)  
 - "xóa cái vừa ghi" → delete_transaction
 - "tháng này chi gì?" → get_monthly_report
-- "nhắc tôi 8 tối" → set_reminder (20:00)
+- "nhắc tôi 8 sáng 12 trưa và 21h" → set_reminder (times: "08:00,12:00,21:00")
+- "ghi nhầm 700k thôi" / "tai nghe thực ra 700k" → update_transaction (dùng description_hint và new_amount)
 - "xóa tài khoản" → reset_account
 
 Nếu không rõ ý định hoặc câu hỏi chung về tài chính, trả lời bằng text thông thường.
@@ -294,12 +366,14 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
       { role: 'user', content },
     ];
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages,
-      tools: TOOLS,
-      tool_choice: 'auto',
-    });
+    const response = await this.callWithFallback(messages);
+    if (!response) {
+      await this.sendTelegramMessage(
+        chatId,
+        '⚠️ Dịch vụ AI đang quá tải, vui lòng thử lại sau ít phút.',
+      );
+      return;
+    }
 
     const choice = response.choices[0];
 
@@ -355,6 +429,41 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
     }
   }
 
+  private isRateLimitError(err: unknown): boolean {
+    if (err instanceof Error) {
+      const msg = err.message.toLowerCase();
+      if (msg.includes('rate limit') || msg.includes('429')) return true;
+    }
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      return (err as { status: number }).status === 429;
+    }
+    return false;
+  }
+
+  private async callWithFallback(
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  ): Promise<OpenAI.Chat.Completions.ChatCompletion | null> {
+    const modelsToTry = [this.model, ...this.fallbackModels];
+    for (const model of modelsToTry) {
+      try {
+        return await this.client.chat.completions.create({
+          model,
+          messages,
+          tools: TOOLS,
+          tool_choice: 'auto',
+        });
+      } catch (err: unknown) {
+        if (this.isRateLimitError(err)) {
+          this.logger.warn(`Rate limit on model ${model}, trying next...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    this.logger.error('All models rate-limited');
+    return null;
+  }
+
   private async executeTool(
     name: string,
     args: Record<string, unknown>,
@@ -370,7 +479,7 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
           amount: Number(args.amount),
           category: args.category as TransactionCategory,
           description: String(args.description),
-          date: String(args.date || today),
+          date: (args.date as string | undefined) ?? today,
         };
         const saved = await this.budgetService.saveTransaction(extracted, user);
         const allTx = await this.budgetService.getMonthTransactions(
@@ -422,14 +531,20 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
       }
 
       case 'get_monthly_report': {
-        const month = String(args.month || currentMonth);
+        const month = (args.month as string | undefined) ?? currentMonth;
         return await this.budgetService.buildFinancialContext(user.id, month);
       }
 
       case 'set_reminder': {
-        const time = String(args.time);
-        await this.reminderService.setReminder(user, time);
-        return `⏰ Đã đặt nhắc nhở hàng ngày lúc ${time}.\nMỗi ngày tôi sẽ gửi tóm tắt chi tiêu cho bạn.\n\nNói "tắt nhắc nhở" để hủy.`;
+        const timesRaw =
+          (args.times as string | null) ?? (args.time as string | null) ?? '';
+        const times = timesRaw
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean);
+        await this.reminderService.setReminder(user, times);
+        const timeDisplay = times.join(', ');
+        return `⏰ Đã đặt nhắc nhở hàng ngày lúc ${timeDisplay}.\nMỗi ngày tôi sẽ gửi tóm tắt chi tiêu cho bạn.\n\nNói "tắt nhắc nhở" để hủy.`;
       }
 
       case 'disable_reminder': {
@@ -443,7 +558,45 @@ Trả lời bằng tiếng Việt, ngắn gọn.`;
         const setting = await this.reminderService.getReminder(user.id);
         if (!setting || !setting.enabled)
           return '🔕 Bạn chưa đặt nhắc nhở nào.\n\nNói "nhắc tôi lúc 20:00" để đặt.';
-        return `⏰ Nhắc nhở hàng ngày lúc ${setting.reminderTime}.\n\nNói "tắt nhắc nhở" để hủy.`;
+        return `⏰ Nhắc nhở hàng ngày lúc ${(setting.reminderTimes as string[]).join(', ')}.\n\nNói "tắt nhắc nhở" để hủy.`;
+      }
+
+      case 'update_transaction': {
+        const newAmount = Number(args.new_amount);
+        const txId = args.id ? Number(args.id) : null;
+        let tx: TransactionEntity | null = null;
+        if (txId) {
+          const recent = await this.budgetService.getRecentTransactions(
+            user.id,
+            200,
+          );
+          tx = recent.find((t) => t.id === txId) ?? null;
+        } else if (args.description_hint) {
+          tx = await (
+            this.budgetService.findTransactionByDescriptionHint as (
+              userId: number,
+              hint: string,
+            ) => Promise<TransactionEntity | null>
+          )(user.id, String(args.description_hint as string));
+        } else {
+          tx = await this.budgetService.getLastTransaction(user.id);
+        }
+        if (!tx) {
+          return '❌ Không tìm thấy khoản giao dịch phù hợp. Bạn có thể dùng "xem giao dịch" để lấy ID rồi thử lại.';
+        }
+        this.pendingUpdate.set(chatId, {
+          txId: tx.id,
+          newAmount,
+          oldAmount: Number(tx.amount),
+          description: tx.description,
+        });
+        return (
+          `🔍 Tôi tìm thấy khoản này:\n` +
+          `  #${tx.id} | ${tx.description}\n` +
+          `  Số tiền hiện tại: ${Number(tx.amount).toLocaleString('vi-VN')}đ\n\n` +
+          `Bạn muốn sửa thành ${newAmount.toLocaleString('vi-VN')}đ không?\n` +
+          `Gõ "đồng ý" để xác nhận hoặc bất kỳ tin nhắn khác để hủy.`
+        );
       }
 
       case 'reset_account': {
